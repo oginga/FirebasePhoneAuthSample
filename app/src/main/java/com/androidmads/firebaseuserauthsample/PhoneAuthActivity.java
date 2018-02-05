@@ -1,16 +1,16 @@
 package com.androidmads.firebaseuserauthsample;
 
+import android.app.ProgressDialog;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.design.widget.Snackbar;
+import android.support.v4.app.FragmentManager;
+import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.AppCompatActivity;
-import android.text.TextUtils;
 import android.util.Log;
-import android.view.View;
-import android.widget.Button;
-import android.widget.EditText;
+import android.widget.Toast;
 
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
@@ -25,21 +25,25 @@ import com.google.firebase.auth.PhoneAuthProvider;
 
 import java.util.concurrent.TimeUnit;
 
+import Frags.AddPhoneFragment;
+import Frags.VerifyPhoneFragment;
+
 /**
  * Created by AJ
  * Created on 09-Jun-17.
  */
 
-public class PhoneAuthActivity extends AppCompatActivity implements
-        View.OnClickListener {
-
-    EditText mPhoneNumberField, mVerificationField;
-    Button mStartButton, mVerifyButton, mResendButton;
+public class PhoneAuthActivity extends AppCompatActivity implements AddPhoneFragment.OnFragmentInteractionListener, VerifyPhoneFragment.OnVerifyInteractionListener {
 
     private FirebaseAuth mAuth;
     private PhoneAuthProvider.ForceResendingToken mResendToken;
     private PhoneAuthProvider.OnVerificationStateChangedCallbacks mCallbacks;
     String mVerificationId;
+
+    //Frags
+    FragmentManager fragmentManager;
+    String telephoneNumber;
+    ProgressDialog pDialog;
 
     private static final String TAG = "PhoneAuthActivity";
 
@@ -48,30 +52,36 @@ public class PhoneAuthActivity extends AppCompatActivity implements
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_phone);
 
-        mPhoneNumberField = (EditText) findViewById(R.id.field_phone_number);
-        mVerificationField = (EditText) findViewById(R.id.field_verification_code);
+        //Init progress dialog
+        pDialog = new ProgressDialog(this);
+        pDialog.setCancelable(false);
 
-        mStartButton = (Button) findViewById(R.id.button_start_verification);
-        mVerifyButton = (Button) findViewById(R.id.button_verify_phone);
-        mResendButton = (Button) findViewById(R.id.button_resend);
+        fragmentManager = getSupportFragmentManager ();
+        FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction ();
 
-        mStartButton.setOnClickListener(this);
-        mVerifyButton.setOnClickListener(this);
-        mResendButton.setOnClickListener(this);
+        AddPhoneFragment phoneFragment=new AddPhoneFragment();
+
+        fragmentTransaction.add(R.id.fragment_container,phoneFragment,"phone");
+        fragmentTransaction.commit ();
+
 
         mAuth = FirebaseAuth.getInstance();
         mCallbacks = new PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             @Override
             public void onVerificationCompleted(PhoneAuthCredential credential) {
+                hideDialog();
                 Log.d(TAG, "onVerificationCompleted:" + credential);
                 signInWithPhoneAuthCredential(credential);
             }
 
             @Override
             public void onVerificationFailed(FirebaseException e) {
+                hideDialog();
                 Log.w(TAG, "onVerificationFailed", e);
                 if (e instanceof FirebaseAuthInvalidCredentialsException) {
-                    mPhoneNumberField.setError("Invalid phone number.");
+
+                    Toast.makeText(getApplicationContext(),"Invalid phone number",Toast.LENGTH_SHORT).show();
+
                 } else if (e instanceof FirebaseTooManyRequestsException) {
                     Snackbar.make(findViewById(android.R.id.content), "Quota exceeded.",
                             Snackbar.LENGTH_SHORT).show();
@@ -81,9 +91,20 @@ public class PhoneAuthActivity extends AppCompatActivity implements
             @Override
             public void onCodeSent(String verificationId,
                                    PhoneAuthProvider.ForceResendingToken token) {
+                hideDialog();
                 Log.d(TAG, "onCodeSent:" + verificationId);
                 mVerificationId = verificationId;
                 mResendToken = token;
+
+                //replace fragment
+                FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction ();
+
+                VerifyPhoneFragment verifyPhoneFragment=new VerifyPhoneFragment();
+
+                fragmentTransaction.add(R.id.fragment_container,verifyPhoneFragment,"Verify");
+
+//                fragmentTransaction.replace(R.id.fragment_container,verifyPhoneFragment,"verify");
+                fragmentTransaction.commit ();
             }
         };
     }
@@ -101,7 +122,7 @@ public class PhoneAuthActivity extends AppCompatActivity implements
                         } else {
                             Log.w(TAG, "signInWithCredential:failure", task.getException());
                             if (task.getException() instanceof FirebaseAuthInvalidCredentialsException) {
-                                mVerificationField.setError("Invalid code.");
+                                Toast.makeText(getApplicationContext(),"Invalid code",Toast.LENGTH_SHORT).show();
                             }
                         }
                     }
@@ -110,6 +131,7 @@ public class PhoneAuthActivity extends AppCompatActivity implements
 
 
     private void startPhoneNumberVerification(String phoneNumber) {
+        telephoneNumber=phoneNumber;
         PhoneAuthProvider.getInstance().verifyPhoneNumber(
                 phoneNumber,        // Phone number to verify
                 60,                 // Timeout duration
@@ -120,6 +142,7 @@ public class PhoneAuthActivity extends AppCompatActivity implements
 
     private void verifyPhoneNumberWithCode(String verificationId, String code) {
         PhoneAuthCredential credential = PhoneAuthProvider.getCredential(verificationId, code);
+        hideDialog();
         signInWithPhoneAuthCredential(credential);
     }
 
@@ -132,16 +155,11 @@ public class PhoneAuthActivity extends AppCompatActivity implements
                 this,               // Activity (for callback binding)
                 mCallbacks,         // OnVerificationStateChangedCallbacks
                 token);             // ForceResendingToken from callbacks
+        hideDialog();
     }
 
-    private boolean validatePhoneNumber() {
-        String phoneNumber = mPhoneNumberField.getText().toString();
-        if (TextUtils.isEmpty(phoneNumber)) {
-            mPhoneNumberField.setError("Invalid phone number.");
-            return false;
-        }
-        return true;
-    }
+
+
     @Override
     public void onStart() {
         super.onStart();
@@ -153,28 +171,55 @@ public class PhoneAuthActivity extends AppCompatActivity implements
     }
 
     @Override
-    public void onClick(View view) {
-        switch (view.getId()) {
-            case R.id.button_start_verification:
-                if (!validatePhoneNumber()) {
-                    return;
-                }
-                startPhoneNumberVerification(mPhoneNumberField.getText().toString());
-                break;
-            case R.id.button_verify_phone:
-                String code = mVerificationField.getText().toString();
-                if (TextUtils.isEmpty(code)) {
-                    mVerificationField.setError("Cannot be empty.");
-                    return;
-                }
-
-                verifyPhoneNumberWithCode(mVerificationId, code);
-                break;
-            case R.id.button_resend:
-                resendVerificationCode(mPhoneNumberField.getText().toString(), mResendToken);
-                break;
+    public void onBackPressed() {
+        // TO enable verify fragment go back to add phone fragment when back button is pressed
+        // TO-DO
+        int count = getFragmentManager().getBackStackEntryCount();
+        Log.e(TAG,"--Back pressed");
+        if (count == 0) {
+            super.onBackPressed();
+            //additional code
+        } else {
+            getFragmentManager().popBackStack();
         }
 
     }
 
+    private void showDialog() {
+        Log.e("DIALOG","==show dialog called");
+        if (!pDialog.isShowing())
+            pDialog.show();
+    }
+
+    public void hideDialog() {
+        if (pDialog.isShowing())
+            pDialog.dismiss();
+    }
+
+
+    @Override
+    public void onVerifyFragmentInteraction(String code) {
+
+        if (code.equals("resend") && !telephoneNumber.isEmpty()){
+            pDialog.setMessage("Resending...");
+            showDialog();
+            resendVerificationCode(telephoneNumber, mResendToken);
+        }else{
+            pDialog.setMessage("Verifying...");
+            showDialog();
+            verifyPhoneNumberWithCode(mVerificationId,code);
+        }
+
+    }
+
+    @Override
+    public void onFragmentInteraction(String msg,String phone) {
+        switch (msg){
+            case "init_auth":
+                pDialog.setMessage("Autheticating...");
+                showDialog();
+                startPhoneNumberVerification(phone);
+                break;
+        }
+    }
 }
